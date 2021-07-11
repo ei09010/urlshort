@@ -16,3 +16,5 @@
 #vscode changes
 .vscode/
 .vs/
+students/mpereira/go.mod
+students/mpereira/go.sum

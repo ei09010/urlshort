@@ -53,15 +53,17 @@ func YAMLHandler(yaml []byte, fallback http.Handler) (http.HandlerFunc, error) {
 }
 
 type pathUrlObj struct {
-	path string `yaml:"path"`
-	url  string `yaml:"url"`
+	Path string `yaml:"path"`
+	Url  string `yaml:"url"`
 }
 
-func parseYAML(yaml []byte) ([]*pathUrlObj, error) {
+func parseYAML(yaml []byte) ([]pathUrlObj, error) {
 
-	var pathList []*pathUrlObj
+	var pathList []pathUrlObj
 
-	err := yamlV2.Unmarshal(yaml, pathList)
+	// var temp pathUrlObj
+
+	err := yamlV2.Unmarshal(yaml, &pathList)
 
 	if err != nil {
 		return pathList, err
@@ -69,12 +71,12 @@ func parseYAML(yaml []byte) ([]*pathUrlObj, error) {
 	return pathList, nil
 }
 
-func buildMap(pathUrlObj []*pathUrlObj) map[string]string {
+func buildMap(pathUrlObj []pathUrlObj) map[string]string {
 
 	pathMap := make(map[string]string, len(pathUrlObj))
 
 	for _, path := range pathUrlObj {
-		pathMap[path.path] = path.url
+		pathMap[path.Path] = path.Url
 	}
 
 	return pathMap
