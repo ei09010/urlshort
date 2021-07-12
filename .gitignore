@@ -18,3 +18,5 @@
 .vs/
 students/mpereira/go.mod
 students/mpereira/go.sum
+main/go.mod
+main/go.sum
