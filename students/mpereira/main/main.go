@@ -13,12 +13,14 @@ import (
 func main() {
 	mux := defaultMux()
 
+	db, err := bolt.Open("my.db", 0600, &bolt.Options{Timeout: 1 * time.Second})
+
 	// Build the MapHandler using the mux as the fallback
 	pathsToUrls := map[string]string{
 		"/urlshort-godoc": "https://godoc.org/github.com/gophercises/urlshort",
 		"/yaml-godoc":     "https://godoc.org/gopkg.in/yaml.v2",
 	}
-	mapHandler := urlshort.MapHandler(pathsToUrls, mux)
+	mapHandler := urlshort.MapHandler(pathsToUrls, db, mux)
 
 	// Build the YAMLHandler using the mapHandler as the
 	// fallback
@@ -43,8 +45,6 @@ func main() {
         }
     ]
 }`
-
-	db, err := bolt.Open("my.db", 0600, &bolt.Options{Timeout: 1 * time.Second})
 
 	if err != nil {
 		log.Fatal(err)

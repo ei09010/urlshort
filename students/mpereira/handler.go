@@ -2,6 +2,7 @@ package urlshort
 
 import (
 	json "encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 
@@ -26,6 +27,8 @@ func MapHandler(pathsToUrls map[string]string, db *bolt.DB, fallback http.Handle
 				b := tx.Bucket([]byte("PathRedirect"))
 
 				v := b.Get([]byte(r.URL.Path))
+
+				fmt.Printf("just read: %s", string(v))
 
 				http.Redirect(w, r, string(v), http.StatusPermanentRedirect)
 
@@ -133,26 +136,20 @@ func JSONHandler(json []byte, jsonFilePath string, db *bolt.DB, fallback http.Ha
 		return nil, err
 	}
 
+	pathMap := buildMapFromJson(parsedJson)
+
 	err = db.Update(func(tx *bolt.Tx) error {
 
-		b := tx.Bucket([]byte("PathRedirect"))
+		b, err := tx.CreateBucketIfNotExists([]byte("PathRedirect"))
 
-		for _, v := range parsedJson.PathURL {
+		for k, v := range pathMap {
 
-			encoded, errJson := encodeJSON(v)
-
-			if errJson != nil {
-				return errJson
-			}
-
-			err = b.Put([]byte(v.Path), encoded)
+			err = b.Put([]byte(k), []byte(v))
 
 		}
 
 		return err
 	})
-
-	pathMap := buildMapFromJson(parsedJson)
 
 	return MapHandler(pathMap, db, fallback), nil
 }
@@ -181,16 +178,6 @@ func parseYAML(yaml []byte) ([]pathUrlObj, error) {
 		return pathList, err
 	}
 	return pathList, nil
-}
-
-func encodeJSON(pathUrl pathUrlUnit) ([]byte, error) {
-
-	encoded, err := json.Marshal(pathUrl)
-
-	if err != nil {
-		return encoded, err
-	}
-	return encoded, nil
 }
 
 func parseJSON(jsonFile []byte) (pathUrlObjJson, error) {
