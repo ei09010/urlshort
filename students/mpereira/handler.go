@@ -1,11 +1,11 @@
 package urlshort
 
 import (
+	json "encoding/json"
 	"io/ioutil"
 	"net/http"
 
-	json "encoding/json"
-
+	"github.com/boltdb/bolt"
 	yamlV2 "gopkg.in/yaml.v2"
 )
 
@@ -15,14 +15,33 @@ import (
 // that each key in the map points to, in string format).
 // If the path is not provided in the map, then the fallback
 // http.Handler will be called instead.
-func MapHandler(pathsToUrls map[string]string, fallback http.Handler) http.HandlerFunc {
+func MapHandler(pathsToUrls map[string]string, db *bolt.DB, fallback http.Handler) http.HandlerFunc {
 
 	return func(w http.ResponseWriter, r *http.Request) {
 
-		if val, ok := pathsToUrls[r.URL.Path]; ok {
-			http.Redirect(w, r, val, http.StatusPermanentRedirect)
+		if db != nil {
+
+			err := db.View(func(tx *bolt.Tx) error {
+
+				b := tx.Bucket([]byte("PathRedirect"))
+
+				v := b.Get([]byte(r.URL.Path))
+
+				http.Redirect(w, r, string(v), http.StatusPermanentRedirect)
+
+				return nil
+			})
+
+			if err != nil {
+				fallback.ServeHTTP(w, r)
+			}
+
 		} else {
-			fallback.ServeHTTP(w, r)
+			if val, ok := pathsToUrls[r.URL.Path]; ok {
+				http.Redirect(w, r, val, http.StatusPermanentRedirect)
+			} else {
+				fallback.ServeHTTP(w, r)
+			}
 		}
 	}
 }
@@ -69,7 +88,7 @@ func YAMLHandler(yaml []byte, yamlFilePath string, fallback http.Handler) (http.
 
 	pathMap := buildMap(parsedYaml)
 
-	return MapHandler(pathMap, fallback), nil
+	return MapHandler(pathMap, nil, fallback), nil
 }
 
 // JSONHandler will parse the provided JSON and then return
@@ -90,7 +109,7 @@ func YAMLHandler(yaml []byte, yamlFilePath string, fallback http.Handler) (http.
 //
 // See MapHandler to create a similar http.HandlerFunc via
 // a mapping of paths to urls.
-func JSONHandler(json []byte, jsonFilePath string, fallback http.Handler) (http.HandlerFunc, error) {
+func JSONHandler(json []byte, jsonFilePath string, db *bolt.DB, fallback http.Handler) (http.HandlerFunc, error) {
 
 	var parsedJson pathUrlObjJson
 	var err error
@@ -114,9 +133,28 @@ func JSONHandler(json []byte, jsonFilePath string, fallback http.Handler) (http.
 		return nil, err
 	}
 
+	err = db.Update(func(tx *bolt.Tx) error {
+
+		b := tx.Bucket([]byte("PathRedirect"))
+
+		for _, v := range parsedJson.PathURL {
+
+			encoded, errJson := encodeJSON(v)
+
+			if errJson != nil {
+				return errJson
+			}
+
+			err = b.Put([]byte(v.Path), encoded)
+
+		}
+
+		return err
+	})
+
 	pathMap := buildMapFromJson(parsedJson)
 
-	return MapHandler(pathMap, fallback), nil
+	return MapHandler(pathMap, db, fallback), nil
 }
 
 type pathUrlObj struct {
@@ -125,10 +163,12 @@ type pathUrlObj struct {
 }
 
 type pathUrlObjJson struct {
-	PathURL []struct {
-		Path string `json:"path"`
-		URL  string `json:"url"`
-	} `json:"PathUrl"`
+	PathURL []pathUrlUnit `json:"PathUrl"`
+}
+
+type pathUrlUnit struct {
+	Path string `json:"path"`
+	URL  string `json:"url"`
 }
 
 func parseYAML(yaml []byte) ([]pathUrlObj, error) {
@@ -141,6 +181,16 @@ func parseYAML(yaml []byte) ([]pathUrlObj, error) {
 		return pathList, err
 	}
 	return pathList, nil
+}
+
+func encodeJSON(pathUrl pathUrlUnit) ([]byte, error) {
+
+	encoded, err := json.Marshal(pathUrl)
+
+	if err != nil {
+		return encoded, err
+	}
+	return encoded, nil
 }
 
 func parseJSON(jsonFile []byte) (pathUrlObjJson, error) {
