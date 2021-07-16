@@ -10,15 +10,26 @@ import (
 	yamlV2 "gopkg.in/yaml.v2"
 )
 
-// MapHandler will return an http.HandlerFunc (which also
-// implements http.Handler) that will attempt to map any
-// paths (keys in the map) to their corresponding URL (values
-// that each key in the map points to, in string format).
-// If the path is not provided in the map, then the fallback
+// DBHandler will return an http.HandlerFunc (which also
+// implements http.Handler) that will attempt to get any
+// paths (keys in boltDB) to their corresponding URL (values
+// that each key in the DB points to, in string format).
+// If the path is not provided in the DB, then the fallback
 // http.Handler will be called instead.
-func MapHandler(pathsToUrls map[string]string, db *bolt.DB, fallback http.Handler) http.HandlerFunc {
+func DBHandler(db *bolt.DB, fallback http.Handler) http.HandlerFunc {
 
 	return func(w http.ResponseWriter, r *http.Request) {
+
+		err := loadDB(db)
+
+		if err != nil {
+			panic(err)
+		}
+
+		var url string
+		path := r.URL.Path
+
+		fmt.Printf("path deducted: %s", path)
 
 		if db != nil {
 
@@ -26,11 +37,13 @@ func MapHandler(pathsToUrls map[string]string, db *bolt.DB, fallback http.Handle
 
 				b := tx.Bucket([]byte("PathRedirect"))
 
-				v := b.Get([]byte(r.URL.Path))
+				bts := b.Get([]byte(path))
 
-				fmt.Printf("just read: %s", string(v))
+				if bts != nil {
+					url = string(bts)
+				}
 
-				http.Redirect(w, r, string(v), http.StatusPermanentRedirect)
+				http.Redirect(w, r, url, http.StatusPermanentRedirect)
 
 				return nil
 			})
@@ -38,14 +51,29 @@ func MapHandler(pathsToUrls map[string]string, db *bolt.DB, fallback http.Handle
 			if err != nil {
 				fallback.ServeHTTP(w, r)
 			}
-
-		} else {
-			if val, ok := pathsToUrls[r.URL.Path]; ok {
-				http.Redirect(w, r, val, http.StatusPermanentRedirect)
-			} else {
-				fallback.ServeHTTP(w, r)
-			}
 		}
+	}
+}
+
+// MapHandler will return an http.HandlerFunc (which also
+// implements http.Handler) that will attempt to map any
+// paths (keys in the map) to their corresponding URL (values
+// that each key in the map points to, in string format).
+// If the path is not provided in the map, then the fallback
+// http.Handler will be called instead.
+func MapHandler(pathsToUrls map[string]string, fallback http.Handler) http.HandlerFunc {
+
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		path := r.URL.Path
+
+		if dest, ok := pathsToUrls[path]; ok {
+			http.Redirect(w, r, dest, http.StatusFound)
+			return
+		}
+
+		fallback.ServeHTTP(w, r)
+
 	}
 }
 
@@ -91,7 +119,7 @@ func YAMLHandler(yaml []byte, yamlFilePath string, fallback http.Handler) (http.
 
 	pathMap := buildMap(parsedYaml)
 
-	return MapHandler(pathMap, nil, fallback), nil
+	return MapHandler(pathMap, fallback), nil
 }
 
 // JSONHandler will parse the provided JSON and then return
@@ -112,7 +140,7 @@ func YAMLHandler(yaml []byte, yamlFilePath string, fallback http.Handler) (http.
 //
 // See MapHandler to create a similar http.HandlerFunc via
 // a mapping of paths to urls.
-func JSONHandler(json []byte, jsonFilePath string, db *bolt.DB, fallback http.Handler) (http.HandlerFunc, error) {
+func JSONHandler(json []byte, jsonFilePath string, fallback http.Handler) (http.HandlerFunc, error) {
 
 	var parsedJson pathUrlObjJson
 	var err error
@@ -138,20 +166,54 @@ func JSONHandler(json []byte, jsonFilePath string, db *bolt.DB, fallback http.Ha
 
 	pathMap := buildMapFromJson(parsedJson)
 
-	err = db.Update(func(tx *bolt.Tx) error {
+	return MapHandler(pathMap, fallback), nil
+}
 
-		b, err := tx.CreateBucketIfNotExists([]byte("PathRedirect"))
+func jsonReader(filePath string) (map[string]string, error) {
 
-		for k, v := range pathMap {
+	if filePath != "" {
+		jsonFile, redErr := ioutil.ReadFile(filePath)
 
-			err = b.Put([]byte(k), []byte(v))
-
+		if redErr != nil {
+			return nil, redErr
 		}
 
-		return err
-	})
+		parsedJson, errParse := parseJSON(jsonFile)
 
-	return MapHandler(pathMap, db, fallback), nil
+		if errParse != nil {
+			return nil, errParse
+		}
+
+		return buildMapFromJson(parsedJson), nil
+	}
+
+	return nil, nil
+
+}
+
+func loadDB(db *bolt.DB) error {
+	if db != nil {
+
+		return db.Update(func(tx *bolt.Tx) error {
+
+			pathMap, err := jsonReader("../conf.json")
+			if err != nil {
+				return err
+			}
+
+			b, err := tx.CreateBucketIfNotExists([]byte("PathRedirect"))
+
+			for k, v := range pathMap {
+
+				err = b.Put([]byte(k), []byte(v))
+
+			}
+
+			return err
+		})
+	}
+
+	return nil
 }
 
 type pathUrlObj struct {

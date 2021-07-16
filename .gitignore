@@ -20,3 +20,5 @@ students/mpereira/go.mod
 students/mpereira/go.sum
 main/go.mod
 main/go.sum
+students/mpereira/main/my.db
+students/mpereira/main/my.db.lock
